@@ -570,6 +570,162 @@ class TextTests(unittest.TestCase):
         self.assertIn("application relies on external", page_blocks[1][0].text)
         self.assertEqual(page_blocks[2], [])
 
+    def test_a_page_join_skips_an_empty_page_and_a_caption_only_page(self):
+        style = p2e.Style()
+
+        def block(kind, text, page):
+            return p2e.Block(kind, [(style, text)], 9.2, page, 80, 92, 120)
+
+        pages = [p2e.Page(n, 612, 792, [], []) for n in (1, 2, 3)]
+        page_blocks = {
+            1: [block("p", "The sentence stops here.", 1)],
+            3: [block("p", "starts later.", 3)],
+        }
+        p2e.merge_across_pages(pages, page_blocks, set())
+        self.assertEqual(page_blocks[1][0].text, "The sentence stops here.")
+        self.assertEqual(page_blocks[3][0].text, "starts later.")
+
+        pages = [p2e.Page(1, 612, 792, [], []), p2e.Page(2, 612, 792, [], [])]
+        page_blocks = {
+            1: [block("caption", "Photo credit", 1), block("image", "", 1)],
+            2: [block("p", "starts a new sentence.", 2)],
+        }
+        p2e.merge_across_pages(pages, page_blocks, set())
+        self.assertEqual(page_blocks[1][0].text, "Photo credit")
+        self.assertEqual(page_blocks[2][0].text, "starts a new sentence.")
+
+    def test_capitalized_continuations_join_only_after_a_comma(self):
+        style = p2e.Style()
+
+        def pair(left, right, **kwargs):
+            return [
+                p2e.Block("p", [(style, left)], 10, 1, 10, 22, 40),
+                p2e.Block("p", [(style, right)], 10, 1, 24, 36, 40, **kwargs),
+            ]
+
+        joined = p2e.join_broken_sentences(pair("After the comma,", "World continues."))
+        self.assertEqual(joined[0].text, "After the comma, World continues.")
+        indented = p2e.join_broken_sentences(pair("See the", "Report today.", indented=True))
+        self.assertEqual(len(indented), 2)
+        fresh = p2e.join_broken_sentences(pair("The total was", "About right now."))
+        self.assertEqual(len(fresh), 2)
+
+    def test_a_note_or_image_does_not_rejoin_the_sentence(self):
+        style = p2e.Style()
+
+        def block(kind, text):
+            return p2e.Block(kind, [(style, text)] if text else [], 10, 1, 0, 12, 40)
+
+        noted = p2e.rejoin_pull_quotes(
+            [
+                block("p", "feedback that"),
+                block("note", "A sidebar."),
+                block("p", "tempers our behavior."),
+            ]
+        )
+        self.assertEqual(noted[0].text, "feedback that")
+        self.assertEqual(noted[2].text, "tempers our behavior.")
+        pictured = p2e.rejoin_pull_quotes(
+            [
+                block("p", "feedback that"),
+                block("image", ""),
+                block("p", "Tempers our behavior."),
+            ]
+        )
+        self.assertEqual(pictured[0].text, "feedback that")
+        self.assertEqual(pictured[2].text, "Tempers our behavior.")
+
+    def test_page_joins_skip_posters_headings_and_finished_sentences(self):
+        style = p2e.Style()
+
+        def block(kind, text, page, **kwargs):
+            pieces = [(style, text)] if text else []
+            return p2e.Block(kind, pieces, 10, page, 0, 12, 40, **kwargs)
+
+        def pages(*numbers):
+            return [p2e.Page(number, 612, 792, [], []) for number in numbers]
+
+        def unchanged(page_blocks, page_count):
+            before = {number: [(item.kind, item.text) for item in blocks] for number, blocks in page_blocks.items()}
+            p2e.merge_across_pages(pages(*range(1, page_count + 1)), page_blocks, set())
+            after = {number: [(item.kind, item.text) for item in blocks] for number, blocks in page_blocks.items()}
+            self.assertEqual(after, before)
+
+        unchanged(
+            {
+                1: [block("p", "people who were setting", 1, poster=True)],
+                2: [block("p", "up a shop were offered a service.", 2)],
+            },
+            2,
+        )
+        unchanged(
+            {
+                1: [block("h2", "A heading", 1)],
+                2: [block("p", "starts here.", 2)],
+            },
+            2,
+        )
+        unchanged(
+            {
+                1: [block("p", "CHAPTER", 1, poster=True), block("p", "The sentence ends.", 1)],
+                2: [block("p", "up a shop were offered a service.", 2)],
+            },
+            2,
+        )
+        unchanged(
+            {
+                1: [block("p", "people who were setting up", 1), block("p", "The sentence ends.", 1)],
+                2: [block("p", "up a shop were offered a service.", 2)],
+            },
+            2,
+        )
+        unchanged(
+            {
+                1: [block("p", "people who were setting", 1)],
+                2: [block("p", "up a shop were offered a service.", 2, indented=True)],
+            },
+            2,
+        )
+        unchanged(
+            {
+                1: [block("p", "people who were setting", 1)],
+                2: [block("pull", "A QUOTE.", 2), block("p", "Up a shop were offered a service.", 2)],
+            },
+            2,
+        )
+        unchanged(
+            {
+                1: [block("p", "CHAPTER OPENING", 1, poster=True), block("pull", "A QUOTE.", 1)],
+                2: [block("p", "up a shop were offered a service.", 2)],
+            },
+            2,
+        )
+        unchanged(
+            {
+                1: [block("p", "The sentence ends.", 1), block("pull", "QUOTE.", 1)],
+                2: [block("h1", "Title", 2), block("pull", "ANOTHER.", 2)],
+                3: [block("p", "up a shop were offered a service.", 3)],
+            },
+            3,
+        )
+        unchanged(
+            {
+                1: [block("note", "Credit", 1), block("image", "", 1)],
+                2: [block("pull", "ONLY A QUOTE.", 2)],
+                3: [block("p", "up a shop were offered a service.", 3)],
+            },
+            3,
+        )
+
+        joined = {
+            1: [block("p", "people who were setting", 1), block("pull", "A QUOTE FROM THE PAGE.", 1)],
+            2: [block("p", "up a shop were offered a service.", 2)],
+        }
+        p2e.merge_across_pages(pages(1, 2), joined, set())
+        self.assertIn("setting up a shop", joined[1][0].text)
+        self.assertEqual(joined[1][1].kind, "pull")
+        self.assertEqual(joined[2], [])
+
     def test_a_slightly_larger_label_starts_its_own_block(self):
         lines = [
             _line(x0=120, x1=400, y0=100, text="Level of risk exposed if this best practice is not established: Low", size=9.2),
@@ -1245,6 +1401,90 @@ class EdgeTests(unittest.TestCase):
         self.assertEqual(p2e.extract_images(_BrokenImages(), object(), {}), [])
         images = p2e.extract_images(_ImagePage(), _ImageDoc(), {})
         self.assertEqual([image.ext for image in images], ["png"])
+
+    def test_extraction_covers_font_advances_ornaments_and_odd_images(self):
+        import pdf2epub_lib.extract as extract
+
+        self.assertEqual(p2e.group_spans([]), [])
+        bare = extract._ornament_span(12, p2e.Style(), 0, 3.0, None, None)
+        self.assertEqual((bare.x0, bare.x1, bare.origin_y), (0.0, 0.0, 0.0))
+        self.assertTrue(bare.ornament)
+
+        ornament = _TracePage(
+            [
+                {
+                    "size": 12,
+                    "font": "Ornaments",
+                    "color": 0,
+                    "chars": [
+                        (0xE100, 1, (10, 40), (10, 30, 20, 42)),
+                        (0xE101, 1, (30, 40), (30, 20, 50, 48)),
+                    ],
+                }
+            ]
+        )
+        lines = p2e.extract_lines(ornament, [])
+        span = lines[0].spans[0]
+        self.assertTrue(span.ornament)
+        self.assertEqual((span.x0, span.x1), (10.0, 50.0))
+
+        font_path = next(
+            (
+                path
+                for path in (
+                    Path("/System/Library/Fonts/Supplemental/Andale Mono.ttf"),
+                    Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+                    Path("/Library/Fonts/Arial.ttf"),
+                )
+                if path.is_file()
+            ),
+            None,
+        )
+        if font_path is not None:
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_font(fontname="F0", fontfile=str(font_path))
+            page.insert_text((72, 72), "Hello", fontname="F0", fontsize=12)
+            catalog = p2e.load_font_catalog(doc)
+            embedded = [rec for rec in catalog if rec.advances]
+            self.assertGreater(embedded[0].advances["A"], 0)
+            doc.close()
+
+        class _OddPage:
+            def get_image_info(self, xrefs=True):
+                return [
+                    {"xref": 1, "bbox": (0, 0, 200, 17)},
+                    {"xref": 2, "bbox": (10, 10, 90, 90)},
+                    {"xref": 3, "bbox": (10, 100, 90, 180)},
+                    {"xref": 4, "bbox": (10, 200, 90, 280)},
+                ]
+
+        class _OddDoc:
+            def extract_image(self, xref):
+                if xref == 2:
+                    return {}
+                if xref == 3:
+                    return {"image": b"jpeg-bytes", "ext": "jpg"}
+                if xref == 4:
+                    return {"image": b"tiff-bytes", "ext": "tiff"}
+                return {"image": b"other", "ext": "png"}
+
+        class _Pix:
+            n = 4
+
+            def __init__(self, *args):
+                pass
+
+            def tobytes(self, kind):
+                return b"png-bytes"
+
+        original = extract.fitz.Pixmap
+        extract.fitz.Pixmap = _Pix
+        try:
+            images = p2e.extract_images(_OddPage(), _OddDoc(), {})
+        finally:
+            extract.fitz.Pixmap = original
+        self.assertEqual([(image.ext, image.data) for image in images], [("jpeg", b"jpeg-bytes"), ("png", b"png-bytes")])
 
 
 class _FontPage:

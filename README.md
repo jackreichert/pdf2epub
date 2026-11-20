@@ -41,3 +41,7 @@ Page numbers and running headers are removed without a flag. The converter looks
 A scanned PDF has no text to extract. The script stops and says so. It does not OCR.
 
 Tables come out as ordinary paragraphs. Pages with two clear text columns are read left column first, then right. Very decorative pages can still need a quick look in a reader.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
