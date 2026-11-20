@@ -1,0 +1,12 @@
+[project]
+name = "pdf2epub"
+version = "0.1.0"
+description = "Convert a PDF into a reflowable EPUB"
+requires-python = ">=3.11"
+dependencies = [
+    "pymupdf>=1.24,<2",
+    "ebooklib>=0.18",
+]
+
+[tool.uv]
+package = false

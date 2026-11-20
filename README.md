@@ -16,19 +16,23 @@ A cover or a section page that is mostly artwork is kept as a picture, so the de
 
 ```bash
 cd projects/pdf2epub
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync
 ```
 
 ## Use
 
 ```bash
-python pdf2epub.py "Some File.pdf"
-python pdf2epub.py "Some File.pdf" -o "Some File.epub" --title "Sapir: Influence" --author "Sapir"
+uv run python pdf2epub.py "Some File.pdf"
+uv run python pdf2epub.py "Some File.pdf" -o "Some File.epub" --title "Sapir: Influence" --author "Sapir"
+uv run python pdf2epub.py "Some File.pdf" --strip "oceanofpdf.com"
+uv run python -m unittest tests.test_pdf2epub -q
 ```
 
 With no `-o`, the EPUB is written next to the PDF.
+
+`--strip TEXT` removes that text on every page. Repeat the flag to remove more than one string. Matching ignores case. A line that is only the watermark is dropped. A longer line keeps the rest of the sentence.
+
+Page numbers and running headers are removed without a flag. The converter looks at each page's lines, not a plain text dump. A line of digits in the top or bottom margin is a page number. A short line that repeats in that margin is a running header. A watermark in the middle of the page is left alone until you pass `--strip`.
 
 `--dump-dir DIR` writes each chapter as HTML so you can check the conversion without opening a reader.
 

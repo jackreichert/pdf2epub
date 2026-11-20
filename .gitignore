@@ -1,1 +1,36 @@
+# Local test output
 .test-out/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+htmlcov/
+.tox/
+.nox/
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Source books and generated books
+*.pdf
+*.epub
+
+# OS
+.DS_Store
