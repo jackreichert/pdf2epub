@@ -6,8 +6,9 @@ import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 
-import fitz
+import pymupdf as fitz
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -405,6 +406,20 @@ class TextTests(unittest.TestCase):
         body = _line(x0=72, x1=400, y0=130, text="After the list.", size=12)
         ordered = p2e.order_items([item, body, marker], page_width=612)
         self.assertEqual([line.text for line in ordered], ["1. Get more customers.", "After the list."])
+
+    def test_a_column_gutter_is_not_one_line(self):
+        left = _line(53, 536, 138, "are almost ruined, the rain falls in, and", size=27)
+        right = _line(561, 1048, 134, "religion and its popularity was resuming", size=32)
+        ordered = p2e.order_items([left, right], page_width=1116)
+        self.assertCountEqual([line.text for line in ordered], [left.text, right.text])
+
+    def test_a_list_number_joins_the_line_beside_it(self):
+        number = _line(72, 88, 100, "1.", size=12)
+        item = _line(96, 400, 100, "The first item.", size=12)
+        ordered = p2e.order_items([number, item], page_width=500)
+        self.assertEqual(len(ordered), 1)
+        self.assertIn("1.", ordered[0].text)
+        self.assertIn("first", ordered[0].text)
 
     def test_a_repeated_fragment_stays_separate(self):
         left = _line(x0=175, x1=304, y0=100, text="school dragged on — and", size=10)
@@ -938,7 +953,19 @@ class EdgeTests(unittest.TestCase):
         with redirect_stderr(err):
             missing = p2e.main([str(folder / "missing.pdf")])
         self.assertEqual(missing, 1)
+        self.assertIn("No such file", err.getvalue())
         self.assertIn("missing.pdf", err.getvalue())
+
+        real = folder / "present.pdf"
+        _write_sample(real)
+        escaped = str(real).replace("present.pdf", "pre\\sent.pdf")
+        err = StringIO()
+        with redirect_stderr(err):
+            escaped_code = p2e.main([escaped])
+        self.assertEqual(escaped_code, 1)
+        self.assertIn("No such file", err.getvalue())
+        self.assertIn("without them", err.getvalue())
+        self.assertIn(str(real), err.getvalue())
 
     def test_convert_refuses_a_missing_locked_or_nearly_blank_pdf(self):
         folder = _out()
@@ -954,6 +981,7 @@ class EdgeTests(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             p2e.convert(scanned)
         self.assertIn("scanned", str(caught.exception).lower())
+        self.assertIn("--ocr", str(caught.exception))
 
         locked = folder / "locked.pdf"
         doc = fitz.open()
@@ -1236,6 +1264,7 @@ class EdgeTests(unittest.TestCase):
         self.assertTrue(p2e.outline_is_filename("The-Lost-Chapter-cover"))
         self.assertTrue(p2e.outline_is_filename("Foo-Bar"))
         self.assertFalse(p2e.outline_is_filename("Real Title"))
+        self.assertTrue(p2e.outline_is_filename("independent71newy_0889"))
 
         class TocDoc:
             def __init__(self, toc, pages):
@@ -1249,6 +1278,10 @@ class EdgeTests(unittest.TestCase):
             TocDoc([[0], [1, "Only", 0], [1, "Only", 3], [2, "Child A", 4], [2, "Child B", 8]], 12)
         )
         self.assertEqual(shallow, {3: "Only", 4: "Child A", 8: "Child B"})
+        scans = p2e.outline_starts(
+            TocDoc([[1, "independent71newy_0889", 1], [1, "independent71newy_0890", 2]], 5)
+        )
+        self.assertEqual(scans, {})
         long = p2e.outline_starts(
             TocDoc(
                 [
@@ -1645,6 +1678,187 @@ def _write_sample(path: Path) -> None:
     )
     doc.save(path)
     doc.close()
+
+
+class OcrTests(unittest.TestCase):
+    def test_items_become_lines_with_size_and_emphasis(self):
+        lines = p2e.lines_from_items(
+            [
+                SimpleNamespace(text="Hello", x=72, y=100, width=40, height=12, font_size=12, font_name="Times"),
+                SimpleNamespace(text="there", x=116, y=100, width=40, height=12, font_size=12, font_name="Times-Italic"),
+                SimpleNamespace(text="Next line", x=72, y=130, width=80, height=20, font_size=None, font_name=None),
+                SimpleNamespace(text="   ", x=72, y=160, width=20, height=12, font_size=12, font_name="Times"),
+                {"text": "skip", "x": None, "y": 10, "width": 10, "height": 10},
+            ]
+        )
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0].text, "Hello there")
+        self.assertTrue(lines[0].spans[1].style.italic)
+        self.assertEqual(lines[1].text, "Next line")
+        self.assertAlmostEqual(lines[1].size, 18.0)
+
+    def test_ocr_flag_reads_a_scanned_page_and_drops_the_scan(self):
+        folder = _out()
+        scanned = folder / "scanned-ocr.pdf"
+        epub_path = folder / "scanned-ocr.epub"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "Hi", fontsize=12)
+        pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 80, 80), 1)
+        page.insert_image(page.rect, pixmap=pix)
+        doc.save(scanned)
+        doc.close()
+
+        sentence = "A scanned paragraph about water quality stayed clear."
+        parser = SimpleNamespace(
+            parse=lambda _path: SimpleNamespace(
+                pages=[
+                    SimpleNamespace(
+                        page_num=1,
+                        text_items=[
+                            SimpleNamespace(
+                                text=sentence,
+                                x=72.0,
+                                y=120.0,
+                                width=420.0,
+                                height=14.0,
+                                font_size=12.0,
+                                font_name="Times-Roman",
+                            )
+                        ],
+                    )
+                ]
+            )
+        )
+        import pdf2epub_lib.convert as convert_mod
+
+        original = convert_mod.fill_sparse_pages
+
+        def wrapped(pdf_path, pages, all_pages=False):
+            return original(pdf_path, pages, parser=parser, all_pages=all_pages)
+
+        convert_mod.fill_sparse_pages = wrapped
+        try:
+            result = p2e.convert(scanned, output=epub_path, ocr=True, title="Water")
+        finally:
+            convert_mod.fill_sparse_pages = original
+        self.assertGreater(result.word_count, 5)
+        with zipfile.ZipFile(epub_path) as archive:
+            html = "\n".join(
+                archive.read(name).decode("utf-8") for name in archive.namelist() if name.endswith(".xhtml")
+            )
+        self.assertIn("water quality", html)
+        self.assertNotIn('class="poster"', html)
+
+    def test_ocr_keeps_a_text_page_and_reports_an_empty_read(self):
+        page = p2e.Page(
+            number=1,
+            width=612,
+            height=792,
+            lines=[_line(72, 400, 100, "Plenty of body text that already lives in the file.")],
+            images=[],
+        )
+
+        class Boom:
+            def parse(self, _path):
+                raise AssertionError("a text page should not be sent to OCR")
+
+        self.assertEqual(p2e.fill_sparse_pages(Path("unused.pdf"), [page], parser=Boom()), 0)
+        self.assertIn("Plenty of body", page.lines[0].text)
+        replacement = SimpleNamespace(
+            parse=lambda _path: SimpleNamespace(
+                pages=[
+                    SimpleNamespace(
+                        page_num=1,
+                        text_items=[
+                            SimpleNamespace(
+                                text="Fresh OCR text that replaces the old layer completely.",
+                                x=72.0,
+                                y=100.0,
+                                width=420.0,
+                                height=14.0,
+                                font_size=12.0,
+                                font_name="OCR",
+                            )
+                        ],
+                    )
+                ]
+            )
+        )
+        self.assertEqual(p2e.fill_sparse_pages(Path("unused.pdf"), [page], parser=replacement, all_pages=True), 1)
+        self.assertIn("Fresh OCR", page.lines[0].text)
+
+        folder = _out()
+        scanned = folder / "empty-ocr.pdf"
+        doc = fitz.open()
+        doc.new_page().insert_text((72, 72), "Hi", fontsize=12)
+        doc.save(scanned)
+        doc.close()
+        empty = SimpleNamespace(parse=lambda _path: SimpleNamespace(pages=[SimpleNamespace(page_num=1, text_items=[])]))
+        import pdf2epub_lib.convert as convert_mod
+
+        original = convert_mod.fill_sparse_pages
+
+        def wrapped(pdf_path, pages, all_pages=False):
+            return original(pdf_path, pages, parser=empty, all_pages=all_pages)
+
+        convert_mod.fill_sparse_pages = wrapped
+        try:
+            with self.assertRaises(ValueError) as caught:
+                p2e.convert(scanned, ocr=True)
+        finally:
+            convert_mod.fill_sparse_pages = original
+        self.assertIn("OCRia-nano-1", str(caught.exception))
+
+    def test_the_command_accepts_ocr(self):
+        folder = _out()
+        scanned = folder / "cli-ocr.pdf"
+        epub_path = folder / "cli-ocr.epub"
+        doc = fitz.open()
+        doc.new_page().insert_text((72, 72), "Hi", fontsize=12)
+        doc.save(scanned)
+        doc.close()
+        import pdf2epub_lib.convert as convert_mod
+
+        original = convert_mod.fill_sparse_pages
+
+        def wrapped(pdf_path, pages, all_pages=False):
+            return original(
+                pdf_path,
+                pages,
+                parser=SimpleNamespace(
+                    parse=lambda _path: SimpleNamespace(
+                        pages=[
+                            SimpleNamespace(
+                                page_num=1,
+                                text_items=[
+                                    SimpleNamespace(
+                                        text="The command read this scanned sentence cleanly.",
+                                        x=72.0,
+                                        y=140.0,
+                                        width=400.0,
+                                        height=14.0,
+                                        font_size=12.0,
+                                        font_name="Times",
+                                    )
+                                ],
+                            )
+                        ]
+                    )
+                ),
+                all_pages=all_pages,
+            )
+
+        convert_mod.fill_sparse_pages = wrapped
+        out = StringIO()
+        try:
+            with redirect_stdout(out):
+                code = p2e.main([str(scanned), "-o", str(epub_path), "--ocr", "--title", "CLI Scan"])
+        finally:
+            convert_mod.fill_sparse_pages = original
+        self.assertEqual(code, 0)
+        self.assertIn("CLI Scan", out.getvalue())
+        self.assertTrue(epub_path.is_file())
 
 
 if __name__ == "__main__":

@@ -24,6 +24,16 @@ def _generic_outline_prefix(outline: str) -> bool:
     return outline.split(":", 1)[0].strip().casefold() in {"article", "chapter"}
 
 
+def _scan_page_name(title: str) -> bool:
+    """A bookmark that is only a scan file stem, such as independent71newy_0889."""
+    text = title.strip()
+    if not text or " " in text:
+        return False
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*[_-][A-Za-z0-9_-]+", text):
+        return False
+    return any(ch.isdigit() for ch in text)
+
+
 def outline_is_filename(title: str) -> bool:
     """Artboard names exported as bookmarks, not titles a reader would see."""
     text = title.strip()
@@ -33,7 +43,7 @@ def outline_is_filename(title: str) -> bool:
         return True
     if re.search(r"[-_]cover\b", text, re.I):
         return True
-    if " " not in text and "-" in text:
+    if " " not in text and ("-" in text or "_" in text):
         return True
     return False
 
@@ -50,6 +60,8 @@ def outline_starts(doc) -> dict[int, str]:
             continue
         entries.append((int(item[0]), str(item[1]).strip(), int(item[2])))
     level1 = [(title, page) for level, title, page in entries if level == 1]
+    if level1 and all(_scan_page_name(title) for title, _page in level1):
+        return {}
     distinct = {page for _title, page in level1}
     if len(distinct) < 2:
         chosen = [(title, page) for level, title, page in entries if level <= 2]

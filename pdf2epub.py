@@ -4,6 +4,7 @@
 Reads the text layer (fonts, size, position) and rebuilds chapters,
 paragraphs, emphasis, and images. Bookmarks are used as chapter breaks
 when the PDF has them. Otherwise chapters come from heading size.
+Pass --ocr to read scanned pages with OCRia-nano-1.
 
 The steps live in pdf2epub_lib. This module is the command and the import
 surface the tests use.
@@ -11,6 +12,7 @@ surface the tests use.
 Usage:
     python pdf2epub.py INPUT.pdf
     python pdf2epub.py INPUT.pdf -o OUTPUT.epub --title "Title" --author "Name"
+    python pdf2epub.py SCAN.pdf --ocr
 """
 
 from __future__ import annotations
@@ -159,6 +161,10 @@ from pdf2epub_lib.convert import (
     convert,
     slug,
 )
+from pdf2epub_lib.ocr import (
+    fill_sparse_pages,
+    lines_from_items,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -176,6 +182,11 @@ def main(argv: list[str] | None = None) -> int:
         metavar="TEXT",
         help="Remove this text wherever it appears, such as a watermark. Repeat for more than one string.",
     )
+    parser.add_argument(
+        "--ocr",
+        action="store_true",
+        help="Read every page with OCRia-nano-1, including a page that already has a text layer. The first run downloads the model.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
     try:
@@ -188,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
             dump_dir=args.dump_dir,
             verbose=args.verbose,
             strip=args.strip,
+            ocr=args.ocr,
         )
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)

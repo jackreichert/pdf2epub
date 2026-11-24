@@ -292,6 +292,13 @@ def merge_baseline_fragments(lines: list[Line]) -> list[Line]:
         ):
             gap = line.x0 - merged[-1].x1
             size = max(merged[-1].size, line.size, 1.0)
+            left_width = merged[-1].x1 - merged[-1].x0
+            right_width = line.x1 - line.x0
+            # Two full lines with a gutter between them are columns. A list
+            # number is narrower than that gutter, so it still joins.
+            if left_width > gap * 2 and right_width > gap * 2 and gap > size * 0.45:
+                merged.append(line)
+                continue
             if 0 < gap <= size * 0.95 and not _duplicate_fragment(merged[-1], line):
                 merged[-1].spans.extend(line.spans)
                 continue

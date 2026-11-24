@@ -5,7 +5,7 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass
 
-import fitz
+import pymupdf as fitz
 
 from pdf2epub_lib.model import FONT_NAME_LIMIT, Line, RawImage, Span, Style
 from pdf2epub_lib.text import _baseline_groups, as_int_color, style_from_font_name

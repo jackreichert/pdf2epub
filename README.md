@@ -25,6 +25,7 @@ uv sync
 uv run python pdf2epub.py "Some File.pdf"
 uv run python pdf2epub.py "Some File.pdf" -o "Some File.epub" --title "Sapir: Influence" --author "Sapir"
 uv run python pdf2epub.py "Some File.pdf" --strip "oceanofpdf.com"
+uv run python pdf2epub.py "Scan.pdf" --ocr
 uv run python -m unittest tests.test_pdf2epub -q
 ```
 
@@ -38,7 +39,7 @@ Page numbers and running headers are removed without a flag. The converter looks
 
 ## Limits
 
-A scanned PDF has no text to extract. The script stops and says so. It does not OCR.
+A scanned PDF has no text layer. Pass `--ocr` to read every page with [OCRia-nano-1](https://www.llamaindex.ai/blog/introducing-ocria-nano-1) through [LiteParse](https://github.com/run-llama/liteparse), including a page whose text layer is present but garbled. The first run downloads the model, about 75 MB. Italics and bold then come only from what the model can see. A page-sized scan image is left out once its text is recovered. The model weights use the modified Open RAIL-M license that ships with the download. LiteParse itself is Apache-2.0.
 
 Tables come out as ordinary paragraphs. Pages with two clear text columns are read left column first, then right. Very decorative pages can still need a quick look in a reader.
 

@@ -6,13 +6,14 @@ import hashlib
 import re
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 
 from pdf2epub_lib.blocks import build_blocks
 from pdf2epub_lib.chapters import infer_book_title, outline_starts, page_has_h1, split_chapters
 from pdf2epub_lib.extract import extract_images, extract_lines, load_font_catalog
 from pdf2epub_lib.joins import join_broken_sentences, merge_across_pages
 from pdf2epub_lib.model import Page, Result
+from pdf2epub_lib.ocr import fill_sparse_pages
 from pdf2epub_lib.prepare import (
     detect_body_size,
     dominant_color,
@@ -24,9 +25,33 @@ from pdf2epub_lib.prepare import (
 from pdf2epub_lib.publish import chapter_inner_html, render_posters, write_epub, xhtml_document
 from pdf2epub_lib.text import junk_metadata
 
+def _missing_file(pdf_path: Path) -> FileNotFoundError:
+    """FileNotFoundError(path) prints only the path, which looks like a blank error."""
+    message = f"No such file: {pdf_path}"
+    text = str(pdf_path)
+    if "\\" in text:
+        cleaned = _without_shell_escapes(text)
+        if cleaned != text and Path(cleaned).is_file():
+            message += f" The backslashes are part of the path. This file exists without them: {cleaned}"
+    return FileNotFoundError(message)
+
+
+def _without_shell_escapes(text: str) -> str:
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] == "\\" and index + 1 < len(text):
+            out.append(text[index + 1])
+            index += 2
+            continue
+        out.append(text[index])
+        index += 1
+    return "".join(out)
+
+
 def _open_document(pdf_path: Path):
     if not pdf_path.is_file():
-        raise FileNotFoundError(pdf_path)
+        raise _missing_file(pdf_path)
     doc = fitz.open(pdf_path)
     if doc.needs_pass:
         raise ValueError(f"{pdf_path.name} is password-protected.")
@@ -53,12 +78,17 @@ def _read_pages(doc) -> tuple[list[Page], dict[int, tuple[bytes, str]]]:
     return pages, image_cache
 
 
-def _require_text(pdf_path: Path, pages: list[Page]) -> None:
+def _require_text(pdf_path: Path, pages: list[Page], *, ocr: bool) -> None:
     text_chars = sum(len(line.text) for page in pages for line in page.lines)
     if text_chars < 40:
+        if ocr:
+            raise ValueError(
+                f"{pdf_path.name} has almost no extractable text. "
+                "OCRia-nano-1 did not find enough text on the scanned pages."
+            )
         raise ValueError(
             f"{pdf_path.name} has almost no extractable text. It looks scanned. "
-            "This script does not OCR pages."
+            "Pass --ocr to read it with OCRia-nano-1."
         )
 
 
@@ -126,11 +156,13 @@ def convert(
     dump_dir: Path | None = None,
     verbose: bool = False,
     strip: list[str] | None = None,
+    ocr: bool = False,
 ) -> Result:
     pdf_path = Path(pdf_path)
     doc = _open_document(pdf_path)
     pages, image_cache = _read_pages(doc)
-    _require_text(pdf_path, pages)
+    ocr_pages = fill_sparse_pages(pdf_path, pages, all_pages=True) if ocr else 0
+    _require_text(pdf_path, pages, ocr=ocr)
     body = detect_body_size(pages)
     cutoff = heading_cutoff(pages, body)
     strip_phrases(pages, strip or [])
@@ -145,6 +177,8 @@ def convert(
     if verbose:
         print(f"pages {doc.page_count}  body {body:.1f}pt  heading cutoff {cutoff:.1f}pt  color #{body_color:06x}")
         print(f"outline entries used: {len(outline)}")
+        if ocr:
+            print(f"OCRia-nano-1 pages: {ocr_pages}")
     destination = output or pdf_path.with_suffix(".epub")
     written_titles = write_epub(doc, chapters, pages, image_blobs, destination, book_title, book_author, language)
     if dump_dir:

@@ -6,7 +6,7 @@ import hashlib
 import uuid
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 
 from pdf2epub_lib.model import CSS, Block, Chapter, Page
 from pdf2epub_lib.text import escape_text, render_pieces
